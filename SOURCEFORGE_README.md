@@ -22,7 +22,7 @@ Each folder contains:
 - `.iso` - The Windows 11 image file
 - `.iso.sha256` - SHA256 checksum for verification
 - `.iso.md5` - MD5 checksum for verification
-- `.iso.txt` - Build information and file details
+- `.iso.txt` - Build information and file details (includes WinRE/recovery status for Core/Nano)
 
 ## 🚀 Quick Links
 
@@ -41,6 +41,7 @@ Each folder contains:
 ### Tiny11 (Standard)
 - Serviceable Windows 11 image
 - Removes 50+ bloatware apps including AI/Copilot/Recall
+- Complete removal of Microsoft Edge WebView2 footprints (Program Files and WinSxS assemblies)
 - Enhanced telemetry blocking and privacy protection
 - VRAM gaming optimization
 - Maintains WinSxS for updates
@@ -49,18 +50,22 @@ Each folder contains:
 
 ### Tiny11 Core
 - Ultra-minimal Windows 11 image
+- Complete removal of Microsoft Edge WebView2 footprints (Program Files and WinSxS assemblies)
 - Aggressive WinSxS removal
 - Windows Update binaries removed (~300 MB saved)
 - No Windows Updates possible (NON-SERVICEABLE)
+- WinRE (Recovery Environment) removed by default — preservable via build flag for real-hardware installs
 - Designed for VMs and testing only
 - **NOT suitable for daily use**
 - **NEW**: 13 non-essential services disabled
 
 ### Nano11
 - EXTREME minimal Windows 11 image
+- Complete removal of Microsoft Edge WebView2 footprints (Program Files and WinSxS assemblies)
 - Removes drivers, fonts, services, apps
 - Windows Update binaries removed (~300 MB saved)
 - No printing, no Notepad/Paint
+- WinRE (Recovery Environment) removed by default — preservable via build flag for real-hardware installs
 - **FOR VM TESTING ONLY**
 - Smallest possible footprint (~1.7-2.5GB)
 - **NEW**: 14 services removed, AI/Recall fully purged
@@ -79,6 +84,7 @@ All builds are created automatically via GitHub Actions with:
 - Multiple language support
 - Various editions (Home, Pro, Education)
 - Optional .NET Framework 3.5 support
+- Optional WinRE (Recovery Environment) preservation for Core/Nano builds — recommended for real-hardware installs to avoid setup error 0x8007000B
 - Bypassed hardware requirements (TPM, Secure Boot, RAM)
 
 ## 📧 Contact

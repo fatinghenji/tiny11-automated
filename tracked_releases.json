@@ -1,90 +1,90 @@
 {
   "builds": {
-    "msft-playwright-25h2-20260121": {
-      "build_id": "msft-playwright-25h2-20260121",
+    "msft-playwright-25h2-20260706": {
+      "build_id": "msft-playwright-25h2-20260706",
       "build_number": "Latest",
       "version": "25H2",
       "title": "Windows 11 25H2",
-      "iso_url": "https://software.download.prss.microsoft.com/dbazure/Win11_25H2_English_x64.iso?t=f476b91f-e5b1-43c2-a6a6-61048a22c6d0&P1=1769093508&P2=601&P3=2&P4=tf65CECrN7H0baK%2bew2eJpw9YHKsi3dApt6zLm5e6MX21eZhgH725EwsEdpXi%2bHX4GbQk7w0KoZhQePwWpe2RXwPTOPSSqnlbCVAuIkReRINKB0BIGgRFHb9szRUt8KMiBd5uQ0vAzNyDEbfuyxwYCLurE3UbG%2bOpxT16zS3UYXufSOrAYfmjtm9obxSEN4DwnlyXZfU%2bAwBywbnqg1cCjHDX%2fGOmmS%2btccd6Z9FpHIBoWDwmPOhRb83D%2brlN2dcTYsWfYjKHjqTHpUDHAJzeIzwfta26WNcAItz0jDWN2Uv%2fXXsomftx2oH%2b70shDW18A8Vv0%2f87V0mAmQ3u%2blDKA%3d%3d",
-      "detected_date": "2026-01-21T14:51:48.439932",
+      "iso_url": "https://software.download.prss.microsoft.com/dbazure/Win11_25H2_English_x64_v2.iso?t=5df9caaa-198e-46a5-8d77-fbe743e3bc59&P1=1783461252&P2=602&P3=2&P4=NPHlRS54r%2boppaZKn4bEqermbQaIAV8GddBXYeZgvPD%2bDNu7dUpPep6T9%2fi901IxuQq1EihFQuNOMCYNsXrNoqHAMuzvgxolbJu4yfoTR6EaWBM%2f0ND%2b2L0S5YVLxSHu0MiiN9Fev2rxWT0TidqwT5IX4kGaLiCD51Y%2bhnf5vlT%2fJyU5%2bmHwHgDuer3tjnlMxJ8KXE2iXS0ZuyGG9O6vryJroaIM9RqeM1sPloDCAlOaf7lnPGyvugNVVRG1NbSizrMBrvxC3niHYRSud2eq%2bx4Ooce4bLal%2fd%2bzBF8gVXqP%2fzamRyn%2f6ZZ5vFC5dzLpkD3X9AHH3fHdAVqbwlb%2f1w%3d%3d",
+      "detected_date": "2026-07-06T21:54:14.824427",
       "architecture": "amd64",
       "channel": "retail",
       "language": "en-us",
       "checksum_sha256": null,
       "size_bytes": null
     },
-    "msft-playwright-25h2-20260125": {
-      "build_id": "msft-playwright-25h2-20260125",
+    "msft-playwright-25h2-20260719": {
+      "build_id": "msft-playwright-25h2-20260719",
       "build_number": "Latest",
       "version": "25H2",
       "title": "Windows 11 25H2",
-      "iso_url": "https://software.download.prss.microsoft.com/dbazure/Win11_25H2_English_x64.iso?t=4e99957f-d919-4ea3-b554-5949e4aaef9a&P1=1769389468&P2=601&P3=2&P4=seNOBMLhq8dJf%2fSVSxmOAk%2brVZJLkDPD9%2fZAyCcZXnLjfBkveVqn3VKgomQ1PEZ%2bOgfG2j8%2fLrS29U0XoVsRsoT2AsjdL%2fTsr3wijL%2bkvCPsItVe2xA4za15wnjfCzZ5ta2JY%2bb5brHLXvm%2blRhDGOtPoSeRnXWfUlj2gtktDsVTeOl0fhSV4eAaEQCjBqqPVLBSkqKMZmPSmkuuT1w7Og8uBfyiMssl1T1mi3np82jCKc33Q%2blvVzTGrLs5cgcdW4iNhjOycZhq6qkaJRATSuDHJnENYaaEz7hNQAFoGH%2bszCTAp%2b1Y4o9NY3WRGrb5FC75hQK7zrraxUrJMhYQsA%3d%3d",
-      "detected_date": "2026-01-25T01:04:28.770535",
+      "iso_url": "https://software.download.prss.microsoft.com/dbazure/Win11_25H2_English_x64_v2.iso?t=17c0d8ff-d2cc-4e54-8cef-822f0217f9df&P1=1784510979&P2=602&P3=2&P4=whPbibWx35y8szHAD94UzSP5AK5qeWWPLbXr3kaTDMjXI0jXO7NSMlVf%2f0sjsNixBjwHkARnOulgjupRhmQ75hLdRcsMEgi7T3nvhvU%2bNIeDlpWF0we3rjYunEV%2bvWO6X9Gar%2bkHrwVAi36grVX3t04ABsK%2fVgnOXSDps180wdSs40RzAMNil2vNqf%2b3iGVo%2fCVUpavlJL27agDx4LD2SuHFFh7dM4qcnhTVf63hFxVcLGNxqAzQELprzYckuiJX7X2AsgrKYxXEvmhqXbhEEv%2bU9O3JJpp%2bkdPT5wqox1JMBf%2bQgsZUkpqyRN0pJcVkZq2OCvnafhSTLf4OrnbN8A%3d%3d",
+      "detected_date": "2026-07-19T01:29:40.478835",
       "architecture": "amd64",
       "channel": "retail",
       "language": "en-us",
       "checksum_sha256": null,
       "size_bytes": null
     },
-    "msft-playwright-25h2-20260219": {
-      "build_id": "msft-playwright-25h2-20260219",
+    "msft-playwright-25h2-20260726": {
+      "build_id": "msft-playwright-25h2-20260726",
       "build_number": "Latest",
       "version": "25H2",
       "title": "Windows 11 25H2",
-      "iso_url": "https://software.download.prss.microsoft.com/dbazure/Win11_25H2_English_x64.iso?t=b4107e5e-ddf2-44c0-858c-8e6874bd9aa1&P1=1771555766&P2=601&P3=2&P4=iOQo%2fAw7gWaZtzATbruNfuc4DUTM1%2fmeovMNfU3zuFnhP3Mh%2bshftA6ip%2ftqr3vWBQM7%2fBi7dmDxoct9eulDRGktQJRrewWgQqcOOTTMrZzMhhyQ9TuISMW0qNl%2fSXYm%2bEug%2bpQogJWvEh10zMU02EU5hzNslwPVbLqi5LX4TuNuP5UJZlEqwRGTDyrXzVxP6ESd5Jx4qdMFdr3%2boFUdfaNVbo6mfg%2bO1Si43RxZwRqUERMBB3EItvOAEgG7%2bFCfF1EKuxdtDeoMvuggXiRVSGrxGIb8HlDyAm%2fe%2fyEaZOU5iGOqod%2fNRyVMDjnXzKoBK0qb3q0fRiSax8RhSru1MQ%3d%3d",
-      "detected_date": "2026-02-19T02:49:27.303416",
+      "iso_url": "https://software.download.prss.microsoft.com/dbazure/Win11_25H2_English_x64_v2.iso?t=f4c33b1b-0e4e-4166-86ce-9ee40bb64ea4&P1=1785116762&P2=602&P3=2&P4=q2UBtO0krT4N7%2f3MLu76rYibhuYogTzcHVgwGdCnvu%2bBH9%2fWtBSX8CSoZHTGxf2lLosOxfYykp1qvTrFuHcE0U%2b4%2f5Fahc7ydSQYdEffQuI0ue35ePEv6EPyhEJwxFIRem72gDsd8vnJyHInL6df1Nt%2fRENT7IdwXMlZoY4ZjveTBevhf5Picp1grZQb734uzA5jmb0KTeFRHxWbQywEHhtp4uULA7KA4jkPhDiIS3IFEHKcI7CLOFCy%2bMu5ZtB%2fp3byseW6J1t9WT3%2fp28up%2bcj6v0EGxE%2bRLpjCMYD76UetNeV9Cr3Zy0SUjtWQD%2fXczf1gm4fSXvX2blEoeJtwA%3d%3d",
+      "detected_date": "2026-07-26T01:46:04.770417",
       "architecture": "amd64",
       "channel": "retail",
       "language": "en-us",
       "checksum_sha256": null,
       "size_bytes": null
     },
-    "msft-playwright-25h2-20260222": {
-      "build_id": "msft-playwright-25h2-20260222",
+    "msft-playwright-25h2-20260802": {
+      "build_id": "msft-playwright-25h2-20260802",
       "build_number": "Latest",
       "version": "25H2",
       "title": "Windows 11 25H2",
-      "iso_url": "https://software.download.prss.microsoft.com/dbazure/Win11_25H2_English_x64.iso?t=aef422fe-1e4d-426b-a792-11fe17f3f224&P1=1771809086&P2=601&P3=2&P4=K7JKV%2bQJK683AEiAR7lJQJ1ovC9tpZnNTH4s1rIFQjy1SlLZRn4Yvnorx%2fY7wxOJmpRgkjNYqKh44ID0jjrYaqWVYwI3wUYvOryJYLlZpKKXRL%2bkjOj4e8iCfAM6gt1sSdTeaYokzNGuuCxSFfs7nCj3Mz4Un0eXl2WMK6DocvpdFC26%2bPcb5WVsNpXKzPUUD1pHOkD3mQL0pxtfmTgd%2bBdOL%2bDTBJo52pilhoKmlguDET5Cc3fLTNMm8kX5ofDowUxBNMa41A5YZMKvHss1WdwWpgIzrVzHAeSEy7sGOqvbOAgQ0ATldYHAesT5se%2bmrqxnR2VXHkyPZThJrVoPQg%3d%3d",
-      "detected_date": "2026-02-22T01:11:27.324421",
+      "iso_url": "https://software.download.prss.microsoft.com/dbazure/Win11_25H2_English_x64_v2.iso?t=8827f003-b359-4e2a-8188-7747c3567142&P1=1785721517&P2=602&P3=2&P4=Gde%2b92df11GYun8VsKoD%2foJH6pWOyDRUb%2fAg83hkftqAYzU0Nywe2F5B8R0axpdNLGx%2b6hL6DvxZc73V8vIx8xJXGz8b7nGSQ5Gxi93dWjJff6bqUozSrDOA22M9KXl3SpQVgS1UCNJEg6E5FS7p2tvYnITRcr6GWH7%2fw7ZPURZLYtWc4ytQYvJhT1sQA7ah53LjQbl4PMpx74P1PYARs3Mp0fuQ2JfvO6anPbJqBfEG4clYq08VlwLDT2WIllXZg3zDcs3UIRAWsWg8hMsFcV0zs1KFnlEfiMNFn5poAiMlEhnUM1zIIp6%2bpv4zbnnRMSkQeEmUX%2bDiAWMAWFoylQ%3d%3d",
+      "detected_date": "2026-08-02T01:45:20.138083",
       "architecture": "amd64",
       "channel": "retail",
       "language": "en-us",
       "checksum_sha256": null,
       "size_bytes": null
     },
-    "msft-playwright-25h2-20260301": {
-      "build_id": "msft-playwright-25h2-20260301",
+    "msft-playwright-25h2-20260809": {
+      "build_id": "msft-playwright-25h2-20260809",
       "build_number": "Latest",
       "version": "25H2",
       "title": "Windows 11 25H2",
-      "iso_url": "https://software.download.prss.microsoft.com/dbazure/Win11_25H2_English_x64.iso?t=751fab18-567b-43b5-a239-7ecb28e98201&P1=1772414237&P2=601&P3=2&P4=SMBBxsTMh6GSOgF%2bJfDqcnVVMk0Yr1asZiJEGoIGkBsistURzqVq0%2brIiLcfUVw2HJyUUAqo1oZqQP3dlR2FSU5zUYaNtFq5HQV1os52AOQkuZ4KwYMRqc%2fj6c%2bMGQCxrtmTQzWhA%2fRFn5WT4ZTQx7%2b9G3R%2bNRPtcAkSOb9q%2bI2dwdK3u%2bXPu7rMwzgG1GiDAVdgm27OX0sf9B6N4KDRh0w5oMirD7ofutKvxf3iH0YhPLRgYhpZwDNlfbTTU6zg7e5VQ68xW8yDrtBj%2fQ7kMI8tCeQps8BnKApAH1pUfdVuvaOeY2YcQJdEbTsyv6l91sia6diULwwmkACKJ0oXgA%3d%3d",
-      "detected_date": "2026-03-01T01:17:17.101466",
+      "iso_url": "https://software.download.prss.microsoft.com/dbazure/Win11_25H2_English_x64_v2.iso?t=8e5b41a1-8d31-46a5-a9f5-13a4e69d3c55&P1=1786323122&P2=602&P3=2&P4=qZ8iDUHBlOBzzzfYtPfELsoyM4OGHtvwlwZ%2f37t919gmo8%2fzfDB1xuLn7y8M6%2bFuUD3kSj6XjcMSzH7l4B4gfw1VN%2bwaoYbIeq28CHyulJWZgAZetr9tcpauAcoJyprlMKnMWf93DdtWBCkBWz8sgFLTWZev2SWTOi9R5%2f8jV%2fHnc%2bVhes22tKdbwNkzJdIEONPHs5OXcpbs8ASIhdqFKNhQtBDQpEgPkuObCgYOK6OT2kK4TMZYHFA8raWNY2ZNAtFsRS3%2b2xgyAlrGHXLCzBYuO6X2KTs3PBt2GyGvN5QeWWXr26I4mpcCPb410KmJLlLefRkMSvlde5YhMGfPIQ%3d%3d",
+      "detected_date": "2026-08-09T00:52:04.279956",
       "architecture": "amd64",
       "channel": "retail",
       "language": "en-us",
       "checksum_sha256": null,
       "size_bytes": null
     },
-    "msft-playwright-25h2-20260308": {
-      "build_id": "msft-playwright-25h2-20260308",
+    "msft-playwright-25h2-20260816": {
+      "build_id": "msft-playwright-25h2-20260816",
       "build_number": "Latest",
       "version": "25H2",
       "title": "Windows 11 25H2",
-      "iso_url": "https://software.download.prss.microsoft.com/dbazure/Win11_25H2_English_x64.iso?t=5a1a323b-ab3d-441f-9ae4-57c3bc81d910&P1=1773018642&P2=601&P3=2&P4=Mw5JA1wODpEM3w%2bY%2f4UTSWVq5mSLg%2b2tjLDXx6nqmBIDZL9XpwyJ9S27SsXpOKnkP2el5qV49dHdqTWrNyQkgiCBykKyQl%2bZj7YPeE5RCEpbT8v1mi3sz1Osx1Jh%2fClM96WK%2bl5xu8Ln8sZLD630vz4Xn5UiBVaCyc%2bU%2fg%2fHNQ9rw2gdTP%2bTfAferRz3rpnLL1Au7xggJMbMYfCn02LY3b6fMlPfnKcTfnduge3FrcD%2fAw%2fGUAI9DEJHwrYxYT87VfRHY%2bMF%2fOYDtzdKdh4lshGZ92IASfBgPIEjVcTLxnbn5raLF7bd9O9ArVQPUahR51Co2Px1NW30bvYJSkVcTw%3d%3d",
-      "detected_date": "2026-03-08T01:10:42.186056",
+      "iso_url": "https://software.download.prss.microsoft.com/dbazure/Win11_25H2_English_x64_v2.iso?t=2dc83599-c794-4d57-882c-47b4f981fe0d&P1=1786927086&P2=602&P3=2&P4=Oho3Mhm5triTA6VmGK%2fxCpCHuVURRlD%2f4AShAwxA1kS%2f3DHK8xviNE%2f9R1Sby%2b7UFCex7ix%2f4Qz5P1vmb1tqfbq5i6s1jt6Fjv9aGneS1d%2f02kcBAzCyERttUK4JKDe9SPmsackX0X7zDnrny6g8Cr1jE69X7jriXH4lLyg9Y1dcO7l6Ug2EBzsaVWXglB9BePosQjFFF%2fgTAgMdZpkk86bOifBT5tE60QCZ%2b2ruQbwwsvG93GfEouIswLbcaY%2fNs1YfN7wKtEdeiva8BybfGhhAE43M%2fMEgohkcZtS2JzTfbVYxRt8DrJJMoJMXr93voe2%2fH%2bVS5pGjCl3%2f6Z1mlA%3d%3d",
+      "detected_date": "2026-08-16T00:38:09.326552",
       "architecture": "amd64",
       "channel": "retail",
       "language": "en-us",
       "checksum_sha256": null,
       "size_bytes": null
     },
-    "msft-playwright-25h2-20260315": {
-      "build_id": "msft-playwright-25h2-20260315",
+    "msft-playwright-25h2-20260823": {
+      "build_id": "msft-playwright-25h2-20260823",
       "build_number": "Latest",
       "version": "25H2",
       "title": "Windows 11 25H2",
-      "iso_url": "https://software.download.prss.microsoft.com/dbazure/Win11_25H2_English_x64.iso?t=c4c012b4-19cc-4a56-8393-7e5696c47f22&P1=1773623984&P2=601&P3=2&P4=tss3qye89VMfF2kCIOfOaIyvtrpZqwJNwGsgRa1Zt%2bYefMO7yKzU8NBSxOyF3y%2frwF694F%2bCtvgYaQqcN31s9CywG5T9A3d0ht7gkofSNmJM0rEJcUq4Th%2btd6zsoRmrS3W0pr6skjXxZI4GC34ubOhQXllg66TTgyxO53AvQFFoX5oo9psbm5YKUVzqZt%2f8M3Zk6ixcu5%2fSSL7znOzmeXy3A6GOQm%2bTnFsqyXa4CcSSn2M6un9ByyUuP8K2MoItVDZG96tLdFCgaFDwaZFdnCAGqHYzi60C%2b46t6dLXCRr7EKajwUhP%2b0BBsHDWX6j2V%2fXe06PB2ffzvEl3ImOVvA%3d%3d",
-      "detected_date": "2026-03-15T01:19:45.650515",
+      "iso_url": "https://software.download.prss.microsoft.com/dbazure/Win11_25H2_English_x64_v2.iso?t=dcb851cf-92b5-4d89-b567-4fba216c079f&P1=1787531934&P2=602&P3=2&P4=ORbLRFycn4bYgc8Ndxrj3zH4CaqAks5mBUi42G0xaVoGxO5cGmhBOo1SfoqwR3ezK3iygZQhP%2bDihvtC9pbjgRR7NQ7WtJ5Sd27iA5EmSYrYyRANJLxmjMDS1FGn5e0jahj3d5h31xWWwWtwwd3by2ntHzTjXY%2fyMd1cViL8NKjgwdE7YgRC5QfOUsDM9KIk234neWXf8SLkfe%2bBcTXVAOcliNiJ4IHw2xNkIxKA7F6cqCliCRsqOFSKIoiaWdCbhC1xu8BEZa%2bNnpKYyNNbX9rFravIsLZkAJhZEQAHp%2fDEJUBR0fZ7CtBU4lB6P2V4l3k3acFnsJo5xTWW8347dw%3d%3d",
+      "detected_date": "2026-08-23T00:38:57.419491",
       "architecture": "amd64",
       "channel": "retail",
       "language": "en-us",
@@ -92,6 +92,6 @@
       "size_bytes": null
     }
   },
-  "last_check": "2026-03-15T01:19:46.683715",
+  "last_check": "2026-08-23T00:38:58.431448",
   "check_count": 7
 }

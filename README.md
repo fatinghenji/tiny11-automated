@@ -3,8 +3,12 @@
 [![Build Tiny11](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11.yml/badge.svg)](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11.yml)
 [![Build Tiny11 Core](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11-core.yml/badge.svg)](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11-core.yml)
 [![Build Nano11](https://github.com/kelexine/tiny11-automated/actions/workflows/build-nano11.yml/badge.svg)](https://github.com/kelexine/tiny11-automated/actions/workflows/build-nano11.yml)
-[![Download Tiny 11](https://img.shields.io/sourceforge/dm/tiny-11-releases.svg)](https://sourceforge.net/projects/tiny-11-releases/files/latest/download)
+[![SourceForge Downloads](https://img.shields.io/sourceforge/dt/tiny-11-releases.svg)](https://sourceforge.net/projects/tiny-11-releases/files/latest/download)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-red?logo=GitHub-Sponsors)](https://github.com/sponsors/kelexine)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/kelexine)
+
 
 [![Code of Conduct](https://img.shields.io/badge/code%20of%20conduct-contributor%20covenant-purple.svg)](CODE_OF_CONDUCT.md)
 
@@ -20,8 +24,8 @@
 
 ## 📊 Project Stats
 
-- **📦 Total Downloads**: 40,000+ (and growing!)
-- **🌍 Active Users**: 40,000+ worldwide
+- **📦 Total Downloads**: 205391 (and growing!)
+- **🌍 Active Users**: 205391 worldwide
 - **✅ Build Success Rate**: 100%
 - **⏱️ Average Build Time**: ~30-50 minutes
 - **💾 ISO Size Reduction**: Up to 50% smaller (Windows 11 25H2)
@@ -174,8 +178,8 @@ Set-ExecutionPolicy Bypass -Scope Process
   <tr>
     <td><strong>Windows Recovery</strong></td>
     <td>✅ Intact</td>
-    <td>❌ Removed</td>
-    <td>❌ Removed</td>
+    <td>⚙️ Optional (removed by default, use <code>-PreserveWinRE</code>)</td>
+    <td>⚙️ Optional (removed by default, use <code>-PreserveWinRE</code>)</td>
   </tr>
   <tr>
     <td><strong>Windows Defender</strong></td>
@@ -230,11 +234,8 @@ tiny11-automated/
 │   ├── ISSUE_TEMPLATE/         # Issue templates
 │   └── PULL_REQUEST_TEMPLATE.md
 ├── scripts/
-│   ├── tiny11maker-BASE.ps1              # Original interactive (ntdevlabs)
 │   ├── tiny11maker-headless.ps1          # ✨ Automated Standard
-│   ├── tiny11Coremaker-BASE.ps1          # Original Core interactive
 │   ├── tiny11coremaker-headless.ps1      # ✨ Automated Core
-│   ├── nano11builder-BASE.ps1            # Original Nano interactive
 │   └── nano11builder-headless.ps1        # ✨ Automated Nano
 ├── autounattend.xml            # OOBE bypass (Standard/Core)
 ├── autounattend-nano.xml       # OOBE bypass (Nano)
@@ -265,6 +266,7 @@ tiny11-automated/
 ```powershell
 .\tiny11coremaker-headless.ps1
     [-ENABLE_DOTNET35]         # Enable .NET Framework 3.5 support
+    [-PreserveWinRE]           # Keep winre.wim intact (required for real hardware / 24H2+ to avoid 0x8007000B)
 ```
 
 ### Nano Variant
@@ -275,6 +277,7 @@ tiny11-automated/
     -INDEX <int>               # Image index
     [-SCRATCH <string>]        # Optional: Scratch disk
     [-SkipCleanup]             # Optional: Keep temp files
+    [-PreserveWinRE]           # Keep winre.wim intact (required for real hardware / 24H2+ to avoid 0x8007000B)
 ```
 
 ### Examples
@@ -285,6 +288,12 @@ tiny11-automated/
 
 # Professional Edition Core with .NET 3.5
 .\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -ENABLE_DOTNET35
+
+# Core build targeting real hardware (preserves WinRE to avoid 0x8007000B on 24H2/25H2)
+.\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -PreserveWinRE
+
+# Nano build with WinRE preserved (real hardware use)
+.\scripts\nano11builder-headless.ps1 -ISO E -INDEX 1 -PreserveWinRE
 
 # Custom scratch drive (useful for limited C:\ space)
 .\scripts\tiny11maker-headless.ps1 -ISO E -INDEX 1 -SCRATCH D
@@ -497,6 +506,9 @@ skip_cleanup:           # Same as Standard
 enable_dotnet35:        # 🆕 Enable .NET Framework 3.5
   type: boolean
   default: false
+preserve_winre:         # 🆕 Preserve winre.wim (real hardware / 24H2+ builds)
+  type: boolean
+  default: false
 ```
 
 #### 3. Build Nano11 (EXTREME Minimal)
@@ -513,6 +525,9 @@ language:               # Language name (English, etc.)
   default: "English"
   
 skip_cleanup:           # Same as above
+preserve_winre:         # 🆕 Preserve winre.wim (real hardware / 24H2+ builds)
+  type: boolean
+  default: false
 ```
 
 ### Workflow Features
@@ -769,10 +784,28 @@ We welcome contributions from the community! Tiny11 Automated serves **2,000+ us
 1. Read [CONTRIBUTING.md](CONTRIBUTING.md)
 2. Fork the repository
 3. Create a feature branch (`git checkout -b feature/amazing-feature`)
-4. Test your changes locally
+4. Test your changes locally (see testing section below)
 5. Commit with clear messages (`git commit -m 'feat: add amazing feature'`)
 6. Push to your fork (`git push origin feature/amazing-feature`)
 7. Open a Pull Request
+
+### 🧪 Scraper Unit Testing
+
+For Python automation components (such as `scripts/microsoft_direct_downloader.py`), a robust unit and integration test suite is located in the `tests/` directory.
+
+To run the test suite in an isolated environment:
+```bash
+# 1. Set up a local virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 2. Install dependencies & test requirements
+pip install -r requirements.txt pytest pytest-asyncio
+
+# 3. Execute the test suite
+pytest tests/test_microsoft_downloader.py
+```
+This test suite uses complete mock coverage of Playwright page locators and user-agent rotations to validate scraper behavior without performing live requests.
 
 ### Contributor Recognition
 
@@ -819,7 +852,7 @@ All contributors are recognized in:
 ### Licensing Information
 
 - **Tiny11 Automated** (headless scripts, CI/CD): MIT License © 2025 kelexine
-- **Original tiny11builder** (BASE scripts): MIT License © ntdevlabs
+- **Inspired by tiny11builder**: Original concept and interactive scripts by [ntdevlabs](https://github.com/ntdevlabs/tiny11builder), MIT License — the headless automation in this project was built on top of that foundation
 - **Individual files**: See copyright notices in each file
 
 ### MIT License Summary

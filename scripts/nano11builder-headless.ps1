@@ -49,7 +49,10 @@ param (
     [string]$SCRATCH,
 
     [Parameter(Mandatory=$false, HelpMessage="Skip cleanup of temporary files")]
-    [switch]$SkipCleanup
+    [switch]$SkipCleanup,
+
+    [Parameter(Mandatory=$false, HelpMessage="Preserve winre.wim instead of deleting it. Use this if targeting real hardware, EFI-enabled VMs (VirtualBox/VMware/Hyper-V), or 24H2/25H2 setups. Without this flag, winre.wim is deleted entirely so Windows Setup skips WinRE config gracefully. DO NOT use an empty stub — it causes error 0x8007000B on EFI systems.")]
+    [switch]$PreserveWinRE
 )
 
 #---------[ Error Handling ]---------#
@@ -96,10 +99,15 @@ function Set-RegistryValue {
         [string]$value
     )
     try {
-        & 'reg' 'add' $path '/v' $name '/t' $type '/d' $value '/f' | Out-Null
+        if ($name) {
+            & 'reg' 'add' $path '/v' $name '/t' $type '/d' $value '/f' | Out-Null
+        } else {
+            & 'reg' 'add' $path '/ve' '/t' $type '/d' $value '/f' | Out-Null
+        }
         Write-Log "Set registry: $path\$name = $value"
     } catch {
-        Write-Log "Error setting registry $path\$name : $_" "WARN"
+        Write-Log "Error setting registry $path\$name : $_" "ERROR"
+        throw
     }
 }
 
@@ -110,6 +118,26 @@ function Remove-RegistryKey {
         Write-Log "Removed registry key: $path"
     } catch {
         Write-Log "Registry key not found or error: $path" "WARN"
+    }
+}
+
+function Remove-RegistryValue {
+    # Removes a single value from a registry key. $path is the full
+    # "key\valueName" form (e.g. '...\Run\OneDriveSetup'), where everything
+    # after the last backslash is the value name and the rest is the key.
+    param([string]$path)
+    $lastSlash = $path.LastIndexOf('\')
+    if ($lastSlash -lt 0) {
+        Write-Log "Invalid registry value path (missing key\value separator): $path" "WARN"
+        return
+    }
+    $keyPath = $path.Substring(0, $lastSlash)
+    $valueName = $path.Substring($lastSlash + 1)
+    try {
+        & 'reg' 'delete' $keyPath '/v' $valueName '/f' 2>&1 | Out-Null
+        Write-Log "Removed registry value: $path"
+    } catch {
+        Write-Log "Registry value not found or error: $path" "WARN"
     }
 }
 
@@ -193,20 +221,84 @@ function Copy-WindowsFiles {
     Write-Log "File copy complete"
 }
 
-function Validate-ImageIndex {
-    Write-Log "Validating image index $INDEX..."
-
-    $images = Get-WindowsImage -ImagePath $wimFilePath
+function Resolve-ImageIndex {
+    Write-Log "Resolving and validating image index $INDEX..."
+    
+    $sourceImagePath = ""
+    if (Test-Path "$DriveLetter\sources\install.wim") {
+        $sourceImagePath = "$DriveLetter\sources\install.wim"
+    } elseif (Test-Path "$DriveLetter\sources\install.esd") {
+        $sourceImagePath = "$DriveLetter\sources\install.esd"
+    } else {
+        throw "Windows installation files not found on ISO"
+    }
+    
+    $images = Get-WindowsImage -ImagePath $sourceImagePath
+    
+    # Standard Microsoft index mapping for Consumer ISOs
+    $expectedNames = @{
+        1 = "Windows 11 Home"
+        4 = "Windows 11 Education"
+        6 = "Windows 11 Pro"
+        7 = "Windows 11 Pro N"
+    }
+    
+    $targetName = $expectedNames[$INDEX]
+    
+    if ($targetName) {
+        $foundImage = $images | Where-Object { $_.ImageName -eq $targetName }
+        if ($foundImage) {
+            $actualIndex = $foundImage.ImageIndex
+            if ($actualIndex -ne $INDEX) {
+                Write-Log "Index shifted! Expected '$targetName' at $INDEX, but found at $actualIndex." "WARN"
+                Write-Log "Automatically adjusting INDEX to $actualIndex."
+                $script:INDEX = $actualIndex
+            } else {
+                Write-Log "Edition '$targetName' matched expected index $INDEX."
+            }
+        } else {
+            Write-Log "Expected edition '$targetName' not found in ISO. Proceeding with literal index $INDEX." "WARN"
+        }
+    } else {
+        Write-Log "No standard mapping for index $INDEX. Proceeding with literal index."
+    }
+    
     $validIndices = $images.ImageIndex
-
-    if ($INDEX -notin $validIndices) {
-        Write-Log "Invalid index $INDEX. Available indices:" "ERROR"
+    
+    if ($script:INDEX -notin $validIndices) {
+        Write-Log "Invalid index $script:INDEX. Available indices:" "ERROR"
         $images | ForEach-Object { Write-Log "  Index $($_.ImageIndex): $($_.ImageName)" }
-        throw "Image index $INDEX not found"
+        throw "Image index $script:INDEX not found"
+    }
+    
+    $selectedImage = $images | Where-Object { $_.ImageIndex -eq $script:INDEX }
+    Write-Log "Selected: Index $script:INDEX - $($selectedImage.ImageName)"
+
+    # kelexine: the list object from 'Get-WindowsImage -ImagePath' has no 'Version'
+    # property - DISM only populates Version/SPBuild/Architecture on the detailed
+    # per-index object returned by 'Get-WindowsImage -ImagePath ... -Index N'.
+    # Re-query with -Index for build-number extraction. Wrapped in try/catch since
+    # this must never hard-fail the build - CI has its own windows_build fallback.
+    $script:DetectedImageName = $selectedImage.ImageName
+    $script:DetectedFullVersion = ""
+    try {
+        $detailedImage = Get-WindowsImage -ImagePath $sourceImagePath -Index $script:INDEX
+        if ($detailedImage -and ($detailedImage.PSObject.Properties.Match('Version').Count -gt 0)) {
+            $script:DetectedFullVersion = $detailedImage.Version
+        } else {
+            Write-Log "Detailed image query for index $script:INDEX returned no 'Version' property." "WARN"
+        }
+    } catch {
+        Write-Log "Failed to query detailed image info for build number detection: $_" "WARN"
     }
 
-    $selectedImage = $images | Where-Object { $_.ImageIndex -eq $INDEX }
-    Write-Log "Selected: Index $INDEX - $($selectedImage.ImageName)"
+    if ($script:DetectedFullVersion -match '(\d+\.\d+)$') {
+        $script:DetectedBuildNumber = $Matches[1]
+        Write-Log "Detected Windows build number: $script:DetectedBuildNumber (full version: $script:DetectedFullVersion)"
+    } else {
+        $script:DetectedBuildNumber = ""
+        Write-Log "Could not parse a build number from image version '$script:DetectedFullVersion'" "WARN"
+    }
 }
 
 function Mount-WindowsImageFile {
@@ -340,6 +432,7 @@ function Remove-BloatwareApps {
         $_.PackageName -like '*WebpImageExtension*' -or
         $_.PackageName -like '*DevHome*' -or
         $_.PackageName -like '*Photos*' -or
+        $_.PackageName -like '*ScreenSketch*' -or
         $_.PackageName -like '*Camera*' -or
         $_.PackageName -like '*QuickAssist*' -or
         $_.PackageName -like '*CoreAI*' -or
@@ -349,6 +442,10 @@ function Remove-BloatwareApps {
         $_.PackageName -like '*Paint*' -or
         $_.PackageName -like '*Notepad*' -or
         $_.PackageName -like '*Recall*' -or
+        $_.PackageName -like '*WebExperience*' -or
+        $_.PackageName -like '*StorePurchaseApp*' -or
+        $_.PackageName -like '*MPEG2VideoExtension*' -or
+        $_.PackageName -like '*WebMediaExtensions*' -or
         $_.PackageName -like '*WindowsAI*' -or
         $_.PackageName -like '*AIFabric*'
     }
@@ -421,7 +518,10 @@ function Remove-SystemPackages {
         "Microsoft-Windows-Printing-PMCPPC-FoD-Package~",
         "Microsoft-Windows-WebcamExperience-Package~",
         "Microsoft-Media-MPEG2-Decoder-Package~",
-        "Microsoft-Windows-Wallpaper-Content-Extended-FoD-Package~"
+        "Microsoft-Windows-Wallpaper-Content-Extended-FoD-Package~",
+        "UserExperience-Recall-Package~",
+        "Microsoft-Windows-AppManagement-AppV-Package~",
+        "Microsoft-Edge-WebView-FOD-Package~"
     )
 
     $allPackages = & dism /image:$scratchDir /Get-Packages /Format:Table
@@ -460,7 +560,7 @@ function Slim-DriverStore {
         'mfd*',      # Multi-function device drivers
         'wscsmd.inf*', # Smartcard readers
         'tapdrv*',   # Tape drives
-        'rdpbus.inf*', # Remote Desktop virtual bus
+        # rdpbus.inf intentionally kept: virtual bus enumeration path used by VMware/Hyper-V during setup
         'tdibth.inf*'  # Bluetooth Personal Area Network
     )
 
@@ -540,7 +640,10 @@ function Remove-MiscellaneousFiles {
     Remove-Item -Path "$scratchDir\Windows\System32\UsoApiAll.dll" -Force -ErrorAction SilentlyContinue
     Remove-Item -Path "$scratchDir\Windows\System32\UsoApi.dll" -Force -ErrorAction SilentlyContinue
     Remove-Item -Path "$scratchDir\Windows\System32\UpdatePolicy.dll" -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "$scratchDir\Windows\System32\drivers\umbus.sys" -Force -ErrorAction SilentlyContinue
+    # NOTE: umbus.sys (User-mode Bus Enumerator) is intentionally kept.
+    # Removing it causes Windows Setup to fail at ~77% on VMware and other hypervisors
+    # during the PnP device initialization phase. Users may remove it post-install
+    # on bare-metal systems if desired.
     Remove-Item -Path "$scratchDir\Windows\SoftwareDistribution" -Recurse -Force -ErrorAction SilentlyContinue
 
     Write-Log "Miscellaneous files removed"
@@ -552,32 +655,140 @@ function Remove-EdgeAndOneDrive {
     # Remove Edge paths
     Remove-Item -Path "$scratchDir\Program Files (x86)\Microsoft\Edge*" -Recurse -Force -ErrorAction SilentlyContinue
     
-    # Remove Edge WebView from WinSxS
-    if ($script:architecture -eq 'amd64') {
-        $folderPath = Get-ChildItem -Path "$scratchDir\Windows\WinSxS" -Filter "amd64_microsoft-edge-webview_31bf3856ad364e35*" -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
-        if ($folderPath) {
-            Remove-Item -Path $folderPath -Recurse -Force -ErrorAction SilentlyContinue
+    # Remove Edge WebView from WinSxS (covers amd64 and arm64)
+    $winSxSPaths = Get-ChildItem -Path "$scratchDir\Windows\WinSxS" -Filter "*microsoft-edge-webview_31bf3856ad364e35*" -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+    foreach ($winSxSPath in $winSxSPaths) {
+        if (Test-Path $winSxSPath) {
+            Remove-Item -Path $winSxSPath -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
     
     Remove-Item -Path "$scratchDir\Windows\System32\Microsoft-Edge-Webview" -Recurse -Force -ErrorAction SilentlyContinue
     
     # Remove OneDrive
-    Remove-Item -Path "$scratchDir\Windows\System32\OneDriveSetup.exe" -Force -ErrorAction SilentlyContinue
+    Write-Log "Removing OneDrive..."
+    $oneDrivePaths = @(
+        "$scratchDir\Windows\System32\OneDriveSetup.exe",
+        "$scratchDir\Windows\SysWOW64\OneDriveSetup.exe"
+    )
+    foreach ($path in $oneDrivePaths) {
+        if (Test-Path $path) {
+            Write-Log "Deleting OneDrive setup: $path"
+            & takeown.exe /f $path /a | Out-Null
+            & icacls.exe $path /grant "$($adminGroup.Value):(F)" /T /C | Out-Null
+            Remove-Item -Path $path -Force -ErrorAction SilentlyContinue
+        }
+    }
 
     Write-Log "Edge and OneDrive removed"
+    
+    # Clean up other remnants
+    Write-Log "Cleaning up other remnants (GameBar, Copilot)..."
+    $otherRemnants = @(
+        "$scratchDir\Windows\GameBarPresenceWriter",
+        "$scratchDir\Windows\System32\SettingsHandlers_Copilot.dll"
+    )
+    foreach ($path in $otherRemnants) {
+        if (Test-Path $path) {
+            Write-Log "Deleting remnant: $path"
+            & takeown.exe /f $path /a | Out-Null
+            & icacls.exe $path /grant "$($adminGroup.Value):(F)" /T /C | Out-Null
+            Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function Remove-WinRE {
-    Write-Log "Removing Windows Recovery Environment..."
-    
+    # Author: kelexine (https://github.com/kelexine)
+    #
+    # WHY NO STUB: Replacing winre.wim with a 0-byte empty file causes Windows
+    # Setup to hard-crash at ~75% with error 0x8007000B (ERROR_BAD_FORMAT) on
+    # EFI-enabled systems (VirtualBox, VMware, Hyper-V, real hardware with EFI).
+    #
+    # At ~75% setup invokes reagentc/DISM to configure the recovery environment.
+    # On EFI systems this step *actually parses the WIM header* — a 0-byte file
+    # is not a valid WIM, so the parser throws and setup aborts.
+    #
+    # When the file is simply ABSENT, Windows Setup gracefully skips WinRE
+    # configuration ("WinRE not found, skipping") and continues to 100%.
+    # The offline registry key WinREEnabled=0 (applied in Apply-RegistryTweaks)
+    # suppresses any post-boot attempt to re-configure or re-enable WinRE.
+    Write-Log "Removing Windows Recovery Environment (winre.wim)..."
+
     $winRE = "$scratchDir\Windows\System32\Recovery\winre.wim"
     if (Test-Path $winRE) {
-        Remove-Item -Path $winRE -Recurse -Force -ErrorAction SilentlyContinue
-        New-Item -Path $winRE -ItemType File -Force | Out-Null
+        Remove-Item -Path $winRE -Force -ErrorAction SilentlyContinue
+        Write-Log "winre.wim deleted. Windows Setup will skip WinRE config gracefully."
+    } else {
+        Write-Log "winre.wim not found — already absent, nothing to do." "WARN"
     }
 
     Write-Log "WinRE removed"
+}
+
+function Patch-ReAgentXml {
+    # Author: kelexine (https://github.com/kelexine)
+    #
+    # WHY THIS IS NEEDED
+    # ------------------
+    # ReAgent.xml (Windows\System32\Recovery\ReAgent.xml) is the offline config
+    # file that reagentc and Windows Setup read to determine WinRE state.
+    #
+    # After Remove-WinRE deletes winre.wim the XML may still contain:
+    #   <WinREStaged state="1"/>         -- tells Setup a staged WIM exists
+    #   <ImageLocation path="..."/>      -- stale path pointing to deleted file
+    #   <InstallState state="1"/>        -- marks WinRE as installed
+    #
+    # On EFI/UEFI systems Windows Setup reads this file during the Pre-Finalize
+    # phase (~75%) via WinReInstallOnTargetOS. If it sees WinREStaged=1 but
+    # can't find or mount the WIM it referenced, setup.exe aborts. If the file
+    # is absent OR consistently says state=0 everywhere, Setup skips gracefully.
+    #
+    # STRATEGY: rewrite the file with all state attributes zeroed and paths
+    # cleared. We preserve the XML schema/version so reagentc doesn't choke on
+    # a malformed file on first boot.
+    Write-Log "Patching ReAgent.xml to clear stale WinRE staging state..."
+
+    $reagentXmlPath = "$scratchDir\Windows\System32\Recovery\ReAgent.xml"
+
+    # Canonical zeroed-out ReAgent.xml — schema version matches Win11 23H2/24H2/25H2.
+    # All state attributes are 0, all path/guid/id/offset attributes are empty/zero.
+    # This is equivalent to what reagentc /disable writes on a live system.
+    $cleanXml = @'
+<?xml version='1.0' encoding='utf-8'?>
+<WindowsRE version="2.0">
+  <WinreBCD id="{00000000-0000-0000-0000-000000000000}"/>
+  <WinreLocation path="" id="0" offset="0" guid="{00000000-0000-0000-0000-000000000000}"/>
+  <ImageLocation path="" id="0" offset="0" guid="{00000000-0000-0000-0000-000000000000}"/>
+  <PBRImageLocation path="" id="0" offset="0" guid="{00000000-0000-0000-0000-000000000000}" index="0"/>
+  <PBRCustomImageLocation path="" id="0" offset="0" guid="{00000000-0000-0000-0000-000000000000}" index="0"/>
+  <InstallState state="0"/>
+  <OsInstallAvailable state="0"/>
+  <CustomImageAvailable state="0"/>
+  <IsAutoRepairOn state="0"/>
+  <WinREStaged state="0"/>
+  <OperationParam path=""/>
+  <OemTool path=""/>
+</WindowsRE>
+'@
+
+    try {
+        # Ensure the Recovery directory exists (it should, but be defensive)
+        $recoveryDir = "$scratchDir\Windows\System32\Recovery"
+        if (-not (Test-Path $recoveryDir)) {
+            New-Item -ItemType Directory -Force -Path $recoveryDir | Out-Null
+            Write-Log "Created missing Recovery directory."
+        }
+
+        # Write as UTF-8 without BOM — reagentc expects plain UTF-8
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($reagentXmlPath, $cleanXml.TrimStart(), $utf8NoBom)
+
+        Write-Log "ReAgent.xml patched: all WinRE state/staging fields zeroed."
+    } catch {
+        Write-Log "Failed to patch ReAgent.xml: $_" "WARN"
+        Write-Log "Setup may still skip WinRE gracefully due to missing winre.wim, but patching is preferred." "WARN"
+    }
 }
 
 function Optimize-WinSxS {
@@ -776,6 +987,10 @@ function Apply-RegistryTweaks {
     # Disable OneDrive folder backup
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\OneDrive' 'DisableFileSyncNGSC' 'REG_DWORD' '1'
 
+    # Remove OneDrive from Run keys (prevent auto-install on first login)
+    Remove-RegistryValue "HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Run\OneDriveSetup"
+    Remove-RegistryValue "HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\Run\OneDriveSetup"
+
     # Disable telemetry
     Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo' 'Enabled' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\Privacy' 'TailoredExperiencesWithDiagnosticDataEnabled' 'REG_DWORD' '0'
@@ -847,10 +1062,99 @@ function Apply-RegistryTweaks {
         Set-RegistryValue "HKLM\zSYSTEM\ControlSet001\Services\$path" "Start" "REG_DWORD" "4"
     }
 
+    # Disable WinRE — prevents reagentc from trying to reconfigure the recovery
+    # environment on first boot after winre.wim has been removed. Without this,
+    # Windows may attempt to recreate a WinRE partition and fail silently (or
+    # trigger error dialogs). WinREEnabled=0 tells reagentc the feature is
+    # intentionally absent. (Companion to the Remove-WinRE build-time deletion.)
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\WinRE' 'WinREEnabled' 'REG_DWORD' '0'
+
     # Hide settings pages
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'SettingsPageVisibility' 'REG_SZ' 'hide:virus;windowsupdate'
 
+    # Easter Egg / Branding
+    Write-Log "Adding Easter Egg branding..."
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' 'legalnoticecaption' 'REG_SZ' 'Tiny11 Automated'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' 'legalnoticetext' 'REG_SZ' 'This image was built using Tiny11 Automated by kelexine. Enjoy your lightweight Windows experience!'
+    
+    # Desktop Context Menu Link
+    Set-RegistryValue 'HKLM\zSOFTWARE\Classes\DesktopBackground\Shell\Tiny11Info' 'MUIVerb' 'REG_SZ' 'Tiny11 Automated Info'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Classes\DesktopBackground\Shell\Tiny11Info' 'Icon' 'REG_SZ' 'shell32.dll,22'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Classes\DesktopBackground\Shell\Tiny11Info' 'Position' 'REG_SZ' 'Bottom'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Classes\DesktopBackground\Shell\Tiny11Info\command' '' 'REG_SZ' 'explorer.exe "https://github.com/kelexine/tiny11-automated"'
+
     Write-Log "Registry tweaks applied"
+}
+
+function Apply-PerformanceTweaks {
+    # Author: kelexine (https://github.com/kelexine)
+    # Bakes performance optimizations into the offline image via registry.
+    # Covers: Memory, CPU/Scheduler, Storage (NTFS), Network (TCP), Gaming, Boot time.
+    # Profile: Aggressive — gaming and VM workloads; requires ≥4 GB RAM.
+    Write-Log "Applying performance optimizations (gaming/VM profile)..."
+
+    # ── Memory Management ──────────────────────────────────────────────────
+    # Keep kernel-mode drivers in physical RAM — eliminates paging latency spikes during gaming
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager\Memory Management' 'DisablePagingExecutive'  'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager\Memory Management' 'LargeSystemCache'        'REG_DWORD' '0'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager\Memory Management' 'ClearPageFileAtShutdown' 'REG_DWORD' '0'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager\Memory Management\PrefetchParameters' 'EnablePrefetcher' 'REG_DWORD' '0'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager\Memory Management\PrefetchParameters' 'EnableSuperfetch' 'REG_DWORD' '0'
+
+    # ── CPU / Thread Scheduler ─────────────────────────────────────────────
+    # 38 (0x26): foreground boost ON + variable short quanta — gaming sweet spot
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\PriorityControl' 'Win32PrioritySeparation' 'REG_DWORD' '38'
+
+    # ── MMCSS (Multimedia Class Scheduler) ────────────────────────────────
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile' 'NetworkThrottlingIndex' 'REG_DWORD' '0xffffffff'
+    # 0 = dedicate maximum CPU to foreground/game; no background CPU reservation
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile' 'SystemResponsiveness'   'REG_DWORD' '0'
+    # MMCSS Games class — maximum GPU and CPU priority for game threads
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' 'GPU Priority'        'REG_DWORD' '8'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' 'Priority'            'REG_DWORD' '6'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' 'Scheduling Category' 'REG_SZ'    'High'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' 'SFIO Priority'       'REG_SZ'    'High'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' 'Latency Sensitive'   'REG_SZ'    'True'
+
+    # ── Storage / NTFS ────────────────────────────────────────────────────
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\FileSystem' 'NtfsDisable8dot3NameCreation' 'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\FileSystem' 'NtfsDisableLastAccessUpdate'  'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\FileSystem' 'NtfsMemoryUsage'              'REG_DWORD' '2'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\FileSystem' 'DisableDeleteNotification'    'REG_DWORD' '0'
+
+    # ── Network / TCP ─────────────────────────────────────────────────────
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Services\Tcpip\Parameters' 'TcpTimedWaitDelay' 'REG_DWORD' '30'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Services\Tcpip\Parameters' 'MaxUserPort'       'REG_DWORD' '65534'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Services\Tcpip\Parameters' 'Tcp1323Opts'       'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Services\Tcpip\Parameters' 'DefaultTTL'        'REG_DWORD' '64'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Services\Tcpip\Parameters' 'EnableWsd'         'REG_DWORD' '0'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' 'PerfTuneNagle' 'REG_SZ' `
+        'powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "Get-ChildItem HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces | ForEach-Object { Set-ItemProperty $_.PSPath TCPNoDelay 1 -Type DWord -ErrorAction SilentlyContinue; Set-ItemProperty $_.PSPath TcpAckFrequency 1 -Type DWord -ErrorAction SilentlyContinue; Set-ItemProperty $_.PSPath TCPDelAckTicks 0 -Type DWord -ErrorAction SilentlyContinue }"'
+
+    # ── Gaming ────────────────────────────────────────────────────────────
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\GraphicsDrivers' 'HwSchMode'   'REG_DWORD' '2'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\GraphicsDrivers' 'TdrDelay'    'REG_DWORD' '10'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\GraphicsDrivers' 'TdrDdiDelay' 'REG_DWORD' '10'
+    Set-RegistryValue 'HKLM\zNTUSER\SYSTEM\GameConfigStore' 'GameDVR_Enabled'                        'REG_DWORD' '0'
+    Set-RegistryValue 'HKLM\zNTUSER\SYSTEM\GameConfigStore' 'GameDVR_FSEBehaviorMode'                'REG_DWORD' '2'
+    Set-RegistryValue 'HKLM\zNTUSER\SYSTEM\GameConfigStore' 'GameDVR_HonorUserFSEBehaviorMode'       'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zNTUSER\SYSTEM\GameConfigStore' 'GameDVR_DXGIHonorFSEWindowsCompatible'  'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zNTUSER\SYSTEM\GameConfigStore' 'GameDVR_EFSEBehaviorMode'               'REG_DWORD' '0'
+    Set-RegistryValue 'HKLM\zNTUSER\SOFTWARE\Microsoft\GameBar' 'AllowAutoGameMode'   'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zNTUSER\SOFTWARE\Microsoft\GameBar' 'AutoGameModeEnabled' 'REG_DWORD' '1'
+
+    # ── Boot Time ─────────────────────────────────────────────────────────
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Serialize' 'StartupDelayInMSec' 'REG_DWORD' '0'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager' 'AutoChkTimeOut' 'REG_DWORD' '0'
+    # Fast Startup OFF — HiberBoot conflicts with clean VM power cycles and snapshot restore
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager\Power' 'HiberbootEnabled' 'REG_DWORD' '0'
+    # Keep crash dump on BSOD — preserves minidump for analysis instead of silent restart
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\CrashControl' 'AutoReboot' 'REG_DWORD' '0'
+    # BCD: short boot menu + disable dynamic tick for lower timer interrupt latency (gaming)
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' 'PerfTuneBCD' 'REG_SZ' `
+        'powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "& bcdedit /set timeout 5 2>&1 | Out-Null; & bcdedit /set disabledynamictick yes 2>&1 | Out-Null; & bcdedit /set useplatformtick yes 2>&1 | Out-Null"'
+
+    Write-Log "Performance optimizations applied (gaming/VM profile)"
 }
 
 function Remove-ScheduledTasks {
@@ -957,7 +1261,7 @@ function Process-BootImage {
     reg load HKLM\zSOFTWARE "$scratchDir\Windows\System32\config\SOFTWARE" 2>&1 | Out-Null
     reg load HKLM\zSYSTEM "$scratchDir\Windows\System32\config\SYSTEM" 2>&1 | Out-Null
 
-    Write-Log "Applying system requirement bypasses to boot image..."
+    Write-Log "Applying system requirement bypasses and WinRE suppression to boot image..."
     Set-RegistryValue 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' 'SV1' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' 'SV2' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zNTUSER\Control Panel\UnsupportedHardwareNotificationCache' 'SV1' 'REG_DWORD' '0'
@@ -967,8 +1271,19 @@ function Process-BootImage {
     Set-RegistryValue 'HKLM\zSYSTEM\Setup\LabConfig' 'BypassSecureBootCheck' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSYSTEM\Setup\LabConfig' 'BypassStorageCheck' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSYSTEM\Setup\LabConfig' 'BypassTPMCheck' 'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zSYSTEM\Setup\LabConfig' 'DisableRecovery' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSYSTEM\Setup\MoSetup' 'AllowUpgradesWithUnsupportedTPMOrCPU' 'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zSYSTEM\Setup\MoSetup' 'SkipInstallingWinRE' 'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\WinRE' 'WinREEnabled' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\BitLocker' 'PreventDeviceEncryption' 'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Setup\Recovery' 'DisableRecovery' 'REG_DWORD' '1'
+
+    # If winre.wim was removed from the OS image, patch ReAgent.xml in boot.wim as well
+    # so SetupHost does not attempt to stage SafeOS from Install.esd during WinPE setup (bypasses error 0x80070003 at 11%)
+    if (-not $PreserveWinRE) {
+        Write-Log "Patching ReAgent.xml in boot.wim to suppress WinRE SafeOS extraction..."
+        Patch-ReAgentXml
+    }
 
     # Unload registry
     reg unload HKLM\zNTUSER 2>&1 | Out-Null
@@ -1063,6 +1378,27 @@ function Create-NanoISO {
     }
 }
 
+function Write-BuildInfo {
+    # kelexine: emits build metadata JSON so CI can read the real Windows build number
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$OutputPath
+    )
+    try {
+        $buildInfo = @{
+            windows_build = $script:DetectedBuildNumber
+            full_version  = $script:DetectedFullVersion
+            image_name    = $script:DetectedImageName
+            image_index   = $INDEX
+            generated_at  = (Get-Date -Format 'o')
+        }
+        $buildInfo | ConvertTo-Json | Out-File -FilePath $OutputPath -Encoding UTF8 -Force
+        Write-Log "Build info written to $OutputPath"
+    } catch {
+        Write-Log "Failed to write build info to $OutputPath : $_" "WARN"
+    }
+}
+
 function Invoke-Cleanup {
     if ($SkipCleanup) {
         Write-Log "Skipping cleanup (SkipCleanup flag set)" "WARN"
@@ -1091,17 +1427,20 @@ try {
     Test-Prerequisites
     Initialize-Directories
 
+    Resolve-ImageIndex
+
     # Handle install.esd conversion if needed
     if (Test-Path "$DriveLetter\sources\install.esd") {
         Write-Log "Found install.esd, conversion required"
         Convert-ESDToWIM
         Copy-WindowsFiles
+        Write-Log "Resetting INDEX to 1 since ESD was exported to a new WIM"
+        $script:INDEX = 1
     } else {
         Write-Log "Found install.wim, no conversion needed"
         Copy-WindowsFiles
     }
 
-    Validate-ImageIndex
     Mount-WindowsImageFile
     Take-OwnershipOfFolders
     Get-ImageMetadata
@@ -1115,11 +1454,18 @@ try {
     Clean-InputMethods
     Remove-MiscellaneousFiles
     Remove-EdgeAndOneDrive
-    Remove-WinRE
+    if ($PreserveWinRE) {
+        Write-Log "Skipping WinRE removal (PreserveWinRE flag set)" "INFO"
+        Write-Log "ReAgent.xml will NOT be patched — original WinRE state preserved." "INFO"
+    } else {
+        Remove-WinRE
+        Patch-ReAgentXml
+    }
 
     # Registry phase
     Load-RegistryHives
     Apply-RegistryTweaks
+    Apply-PerformanceTweaks
     Remove-ScheduledTasks
     Unload-RegistryHives
 
@@ -1135,6 +1481,7 @@ try {
     Convert-ToESD
     Clean-IsoRoot
     Create-NanoISO
+    Write-BuildInfo -OutputPath "$PSScriptRoot\nano11-buildinfo.json"
 
     # Cleanup
     Invoke-Cleanup

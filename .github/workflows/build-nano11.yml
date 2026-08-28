@@ -16,6 +16,10 @@ on:
         description: 'Windows 11 ISO download URL'
         required: true
         default: 'https://software.download.prss.microsoft.com/dbazure/Win11_25H2_English_x64.iso?t=641a9719-5089-48d3-b683-44d9012b040e&P1=1765893811&P2=601&P3=2&P4=kPgTlzFR6%2bt9lzW6l2ITzVyc3%2fMHiCzaC5YMwf3RcQH%2bXezCHitvttx2e91%2fT%2bPcXPxVLKAYbeqrAW2mZozm1q%2bTjC4JYdInC0gROdmtKH2X84U99HD1RzRhTXmFi7lemqPDAHcOZ4yx95AzW6rzMvQF2QBsmSE%2fl5l8bWupChqEd28LHdjMXrSu3otYpyxc8S4cFluEgaLD2mkPCrqX61ij2PUrqiZM2jq%2bbz5Fx3kNXCZ3Z1pJkfKKQGb3T%2fvbbWfu7avjuU2kBDJjyeecJH3MGeTP9jsbT6oIHU95AL05%2bA43il%2f4rGDNcFGji1logGrKYi%2f%2b2fDpCFuGh9rN5w%3d%3d'
+      windows_build:
+        description: 'Fallback Windows build number (e.g. 26200.8655) — only used if it cannot be read directly from the ISO'
+        required: false
+        default: ''
       image_index:
         description: 'Windows image index (1=Home, 4=Education, 6=Pro, 7=Pro N)'
         required: true
@@ -35,6 +39,11 @@ on:
         required: false
         default: false
         type: boolean
+      preserve_winre:
+        description: 'Preserve winre.wim (required for real hardware / 24H2+ installs to avoid 0x8007000B)'
+        type: boolean
+        required: false
+        default: false
 
 env:
   ARIA2C_CONNECTIONS: '16'
@@ -55,9 +64,16 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Generate release tag and ISO name
-        shell: powershell
+      - name: Record build start time
+        shell: pwsh
         run: |
+          $startUnix = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+          Add-Content -Path $env:GITHUB_ENV -Value "BUILD_START_UNIX=$startUnix"
+
+      - name: Generate folder name and build parameters
+        shell: pwsh
+        run: |
+          # ISO filename/tag are finalized later in "Verify nano11 ISO creation"
           $date = Get-Date -Format 'yyyy-MM-dd'
           $version = "${{ github.event.inputs.windows_version }}"
 
@@ -72,25 +88,15 @@ jobs:
 
           $language = "${{ github.event.inputs.language }}" -replace '[^a-zA-Z]', ''
 
-          # Generate tag and names - Nano11 specific naming
+          # Nano11 specific naming (folder name unchanged)
           $folderName = "Nano11-$edition-$version"
-          $isoName = "nano11-$version-$language-$edition-$date.iso"
 
-          $baseTag = "nano11-$version-$date"
-
-          $existingTags = $(git tag -l "$baseTag*" | Measure-Object).Count
-          if ($existingTags -gt 0) {
-              $baseTag = "$baseTag-$($existingTags + 1)"
-          }
-
-          Write-Output "Generated tag: $baseTag"
-          Write-Output "Generated ISO name: $isoName"
           Write-Output "Generated folder name: $folderName"
 
-          Add-Content -Path $env:GITHUB_ENV -Value "RELEASE_TAG=$baseTag"
-          Add-Content -Path $env:GITHUB_ENV -Value "ISO_FILENAME=$isoName"
           Add-Content -Path $env:GITHUB_ENV -Value "FOLDER_NAME=$folderName"
           Add-Content -Path $env:GITHUB_ENV -Value "EDITION_NAME=$edition"
+          Add-Content -Path $env:GITHUB_ENV -Value "BUILD_DATE=$date"
+          Add-Content -Path $env:GITHUB_ENV -Value "BUILD_LANGUAGE=$language"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -110,13 +116,14 @@ jobs:
               version = "${{ inputs.windows_version }}"
               build_type = "Nano"
               edition = "$env:EDITION_NAME"
+              preserve_winre = "${{ inputs.preserve_winre }}"
             } -Compress)
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_BUILDS }}
         shell: pwsh
 
       - name: System information
-        shell: powershell
+        shell: pwsh
         run: |
           Write-Output "=== System Information (Nano11 Build) ==="
           Write-Output "OS: $(Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty Caption)"
@@ -134,14 +141,14 @@ jobs:
           }
 
       - name: Install aria2c
-        shell: powershell
+        shell: pwsh
         run: |
           Write-Output "Installing aria2c for faster downloads..."
           choco install aria2 -y --no-progress
           aria2c --version
 
       - name: Display build warnings
-        shell: powershell
+        shell: pwsh
         run: |
           Write-Output "******************************************************************"
           Write-Output "*               !!! NANO11 EXTREME BUILD WARNING !!!             *"
@@ -166,7 +173,7 @@ jobs:
           Start-Sleep -Seconds 15
 
       - name: Download Windows 11 ISO
-        shell: powershell
+        shell: pwsh
         run: |
           $url = "${{ github.event.inputs.windows_iso_url }}"
           $output = "Win11_Source.iso"
@@ -205,7 +212,7 @@ jobs:
           Write-Output "Download complete: ${sizeGB}GB in $($downloadTime.TotalMinutes.ToString('F2')) minutes"
 
       - name: Mount Windows ISO
-        shell: powershell
+        shell: pwsh
         run: |
           $isoPath = Join-Path $PWD "Win11_Source.iso"
           Write-Output "Mounting ISO: $isoPath"
@@ -260,7 +267,7 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "ISO_DRIVE=$driveLetter"
 
       - name: Prepare autounattend-nano.xml
-        shell: powershell
+        shell: pwsh
         run: |
           if (Test-Path "autounattend-nano.xml") {
             Write-Output "Found local autounattend-nano.xml"
@@ -272,7 +279,7 @@ jobs:
           }
 
       - name: Verify headless script
-        shell: powershell
+        shell: pwsh
         run: |
           $scriptPath = ".\scripts\nano11builder-headless.ps1"
 
@@ -287,7 +294,7 @@ jobs:
           Write-Output "Script size: $([math]::Round((Get-Item $scriptPath).Length / 1KB, 2)) KB"
 
       - name: Run nano11builder (headless mode)
-        shell: powershell
+        shell: pwsh
         run: |
           Set-ExecutionPolicy Bypass -Scope Process -Force
 
@@ -307,18 +314,20 @@ jobs:
           Write-Output "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
           Write-Output "!!! EXTREME NANO BUILD - VM TESTING ONLY!"
 
+          $preserveWinRE = [System.Boolean]::Parse("${{ github.event.inputs.preserve_winre }}")
+          Write-Output "Preserve WinRE: $preserveWinRE"
+
           $startTime = Get-Date
 
-          .\scripts\nano11builder-headless.ps1 @params
+          .\scripts\nano11builder-headless.ps1 @params -PreserveWinRE:$preserveWinRE
 
           $buildTime = (Get-Date) - $startTime
           Write-Output "Nano build completed in $($buildTime.TotalMinutes.ToString('F2')) minutes"
 
       - name: Verify nano11 ISO creation
-        shell: powershell
+        shell: pwsh
         run: |
           $tempIso = "scripts\nano11.iso"
-          $isoName = "${{ env.ISO_FILENAME }}"
 
           if (-not (Test-Path $tempIso)) {
             Write-Error "$tempIso was not created!"
@@ -328,6 +337,49 @@ jobs:
             Get-ChildItem -Path scripts | Format-Table Name, Length, LastWriteTime
             exit 1
           }
+
+          # Real build number: from ISO metadata, else workflow_dispatch fallback
+          $buildInfoPath = "scripts\nano11-buildinfo.json"
+          $buildNumber = ""
+
+          if (Test-Path $buildInfoPath) {
+            try {
+              $buildInfo = Get-Content -Path $buildInfoPath -Raw | ConvertFrom-Json
+              $buildNumber = $buildInfo.windows_build
+              Write-Output "Build number from ISO metadata: $buildNumber"
+            } catch {
+              Write-Output "Could not parse $buildInfoPath : $_"
+            }
+          }
+
+          if ([string]::IsNullOrWhiteSpace($buildNumber)) {
+            $buildNumber = "${{ github.event.inputs.windows_build }}"
+            if (-not [string]::IsNullOrWhiteSpace($buildNumber)) {
+              Write-Output "Build number from workflow fallback input: $buildNumber"
+            }
+          }
+
+          if ([string]::IsNullOrWhiteSpace($buildNumber)) {
+            Write-Error "Unable to determine Windows build number: ISO metadata extraction failed and no windows_build fallback input was provided. Refusing to publish an ISO without a verifiable build number."
+            exit 1
+          }
+
+          $version = "${{ github.event.inputs.windows_version }}"
+          $language = "$env:BUILD_LANGUAGE"
+          $edition = "$env:EDITION_NAME"
+          $date = "$env:BUILD_DATE"
+
+          $isoName = "nano11-$version-$buildNumber-$language-$edition-$date.iso"
+
+          # Build-number-first tag, suffixed to avoid collisions across editions
+          $baseTag = "$buildNumber-nano-$($edition.ToLower())"
+
+          Write-Output "Generated ISO name: $isoName"
+          Write-Output "Generated release tag: $baseTag"
+
+          Add-Content -Path $env:GITHUB_ENV -Value "ISO_FILENAME=$isoName"
+          Add-Content -Path $env:GITHUB_ENV -Value "RELEASE_TAG=$baseTag"
+          Add-Content -Path $env:GITHUB_ENV -Value "WINDOWS_BUILD_NUMBER=$buildNumber"
 
           Move-Item -Path $tempIso -Destination $isoName -Force
           Write-Output "ISO moved and renamed to: $isoName"
@@ -351,24 +403,27 @@ jobs:
           Nano11 ISO Verification
           =======================
           File: $isoName
+          Windows Build: $buildNumber
           Size: ${sizeGB}GB
           Build Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
           Image Index: ${{ github.event.inputs.image_index }}
           Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
           BUILD TYPE: NANO11 (EXTREME MINIMAL - Testing Only!)
+          WinRE: $(if ("${{ github.event.inputs.preserve_winre }}" -eq "true") { "Preserved" } else { "Removed (stub)" })
 
           SHA256: $sha256
           MD5: $md5
 
           Removed Components:
+            $(if ("${{ github.event.inputs.preserve_winre }}" -ne "true") { "- Windows Recovery Environment (WinRE)" })
             - Drivers (printer, scanner, tape, MFD)
             - Fonts (most non-essential)
             - .NET Native Images
             - Input methods (CJK)
             - Services (Spooler, Fax, etc.)
             - Additional apps (Notepad, Paint, Photos, Camera)
-            - All Core build removals
+            - All other Core build removals
 
           ⚠️ THIS BUILD IS FOR VM TESTING ONLY
           "@
@@ -389,17 +444,17 @@ jobs:
         if: success()
         continue-on-error: true
         run: |
-          # Get ISO size
-          $isoPath = Get-ChildItem -Path . -Filter "*.iso" -Recurse | Select-Object -First 1
-          $isoSize = if ($isoPath) { 
-            "{0:N2} GB" -f ($isoPath.Length / 1GB)
-          } else { 
-            "Unknown" 
+          $isoSize = if ($env:ISO_SIZE_GB) {
+            "$env:ISO_SIZE_GB GB"
+          } else {
+            $isoPath = Get-ChildItem -Path . -Filter "*.iso" -Recurse | Select-Object -First 1
+            if ($isoPath) { "{0:N2} GB" -f ($isoPath.Length / 1GB) } else { "Unknown" }
           }
-          
-          # Calculate duration (rough estimate)
-          $duration = "${{ job.duration }}"
-          
+
+          # Compute real elapsed wall-clock duration from the recorded start time
+          $elapsed = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - [long]$env:BUILD_START_UNIX
+          $duration = "{0}m {1}s" -f [math]::Floor($elapsed / 60), ($elapsed % 60)
+
           python scripts/discord_notify.py `
             --webhook "$env:DISCORD_WEBHOOK" `
             --type build-completed `
@@ -407,16 +462,18 @@ jobs:
               version = "${{ inputs.windows_version }}"
               build_type = "Nano"
               edition = "$env:EDITION_NAME"
-              duration = "Completed"
+              duration = $duration
               iso_size = $isoSize
               download_url = "https://sourceforge.net/projects/tiny-11-releases/"
+              preserve_winre = "${{ inputs.preserve_winre }}"
+              windows_build = "$env:WINDOWS_BUILD_NUMBER"
             } -Compress)
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_BUILDS }}
         shell: pwsh
 
       - name: Cleanup before upload
-        shell: powershell
+        shell: pwsh
         run: |
           Write-Output "Cleaning up to free disk space..."
 
@@ -435,7 +492,7 @@ jobs:
 
       - name: Check upload configuration
         id: check-upload
-        shell: powershell
+        shell: pwsh
         env:
           SF_KEY: ${{ secrets.SF_SSH_KEY }}
           ENABLE_UPLOAD: ${{ vars.ENABLE_SOURCEFORGE_UPLOAD }}
@@ -453,7 +510,7 @@ jobs:
         env:
           SF_SSH_KEY: ${{ secrets.SF_SSH_KEY }}
           SF_USERNAME: ${{ secrets.SF_USERNAME }}
-        shell: powershell
+        shell: pwsh
         run: |
           if ([string]::IsNullOrWhiteSpace($env:SF_SSH_KEY)) {
             Write-Error "SF_SSH_KEY secret is not configured"
@@ -467,7 +524,7 @@ jobs:
           
       - name: Setup SSH for SourceForge
         if: env.DO_UPLOAD == 'true'
-        shell: powershell
+        shell: pwsh
         env:
           SF_PROJECT: ${{ secrets.SF_PROJECT }}
           SF_SSH_KEY: ${{ secrets.SF_SSH_KEY }}
@@ -503,7 +560,7 @@ jobs:
 
       - name: Upload to SourceForge
         if: env.DO_UPLOAD == 'true'
-        shell: powershell
+        shell: pwsh
         env:
           SF_USERNAME: ${{ secrets.SF_USERNAME }}
           SF_PROJECT: ${{ secrets.SF_PROJECT }}
@@ -541,7 +598,7 @@ jobs:
           
       - name: Cleanup SSH credentials
         if: always()
-        shell: powershell
+        shell: pwsh
         run: |
           $keyPath = "$env:USERPROFILE\.ssh\sf_key"
           if (Test-Path $keyPath) {
@@ -590,6 +647,7 @@ jobs:
             | **Base** | Windows 11 ${{ github.event.inputs.windows_version }} |
             | **Index** | ${{ github.event.inputs.image_index }} |
             | **Language** | ${{ github.event.inputs.language }} |
+            | **WinRE** | ${{ github.event.inputs.preserve_winre == 'true' && 'Preserved' || 'Removed (stub)' }} |
 
             ### 🔒 Checksums
 
@@ -604,6 +662,7 @@ jobs:
             ```
 
             ### 💣 What's Removed (Beyond Core)
+            ${{ github.event.inputs.preserve_winre != 'true' && '- **Windows Recovery Environment (WinRE)**' || '' }}
             - **Driver packages** (printer, scanner, MFD, tape)
             - **Fonts** (keeping only Segoe, Arial, Calibri, Times)
             - **.NET Native Images** (pre-compiled assemblies)
@@ -618,6 +677,7 @@ jobs:
             - ❌ **NO Photos app** - Use file explorer only
             - ❌ **NO CJK Input** - Chinese/Japanese/Korean removed
             - ❌ **MINIMAL fonts** - Only essential Western fonts
+            - ${{ github.event.inputs.preserve_winre == 'true' && '✅ **Recovery intact** - WinRE preserved via -PreserveWinRE flag' || '❌ **NO Recovery** - No "Reset this PC" or Advanced Startup' }}
             - ❌ All Core limitations apply
 
             ### ✅ Use Cases
@@ -640,7 +700,7 @@ jobs:
             ${{ env.ISO_NAME }}.txt
           
       - name: Workflow summary
-        shell: powershell
+        shell: pwsh
         run: |
           $summary = @"
           # 🔥 Nano11 Build Completed Successfully
@@ -651,6 +711,7 @@ jobs:
           - **Release:** ${{ env.RELEASE_TAG }}
           - **Version:** ${{ github.event.inputs.windows_version }}
           - **Type:** Nano (EXTREME Minimal)
+          - **WinRE:** ${{ github.event.inputs.preserve_winre == 'true' && 'Preserved' || 'Removed (stub)' }}
 
           ## 📥 Download
           ${{ secrets.SF_SSH_KEY != '' && format('🔗 **SourceForge:** [{0}]({1})', env.ISO_NAME, env.SF_DOWNLOAD_URL) || '🔗 **GitHub Artifacts:** Available in workflow run' }}
@@ -679,10 +740,47 @@ jobs:
           "@
 
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $summary
+      - name: Capture build error for Discord
+        if: failure()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $logFile = Get-ChildItem -Path scripts -Filter "nano11_*.log" -ErrorAction SilentlyContinue |
+                     Sort-Object LastWriteTime -Descending |
+                     Select-Object -First 1
+          if ($logFile) {
+            $errorLines = Select-String -Path $logFile.FullName -Pattern '\[ERROR\]' |
+                          Select-Object -Last 10 |
+                          ForEach-Object { $_.Line }
+            $errorSummary = if ($errorLines) {
+              $errorLines -join "`n"
+            } else {
+              (Get-Content $logFile.FullName -Tail 5) -join "`n"
+            }
+            Add-Content -Path $env:GITHUB_ENV -Value "BUILD_ERROR_SUMMARY<<EOF"
+            Add-Content -Path $env:GITHUB_ENV -Value $errorSummary
+            Add-Content -Path $env:GITHUB_ENV -Value "EOF"
+          } else {
+            Add-Content -Path $env:GITHUB_ENV -Value "BUILD_ERROR_SUMMARY=No builder log found — check step outputs above."
+          }
+
+      - name: Upload build log on failure
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: nano11-build-log-${{ github.run_id }}
+          path: scripts/nano11_*.log
+          retention-days: 14
+          if-no-files-found: warn
+
       - name: Discord - Build Failed
         if: failure()
         continue-on-error: true
         run: |
+          $elapsed = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - [long]$env:BUILD_START_UNIX
+          $duration = "{0}m {1}s" -f [math]::Floor($elapsed / 60), ($elapsed % 60)
+
           python scripts/discord_notify.py `
             --webhook "$env:DISCORD_WEBHOOK" `
             --type build-failed `
@@ -690,10 +788,11 @@ jobs:
               version = "${{ inputs.windows_version }}"
               build_type = "Nano"
               edition = "$env:EDITION_NAME"
-              error = "Build failed - check logs for details"
+              duration = $duration
+              error = $env:BUILD_ERROR_SUMMARY
               logs_url = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              windows_build = "$env:WINDOWS_BUILD_NUMBER"
             } -Compress)
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_ERRORS }}
         shell: pwsh
-

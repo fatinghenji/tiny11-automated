@@ -87,7 +87,11 @@ function Set-RegistryValue {
         [string]$value
     )
     try {
-        & 'reg' 'add' $path '/v' $name '/t' $type '/d' $value '/f' | Out-Null
+        if ($name) {
+            & 'reg' 'add' $path '/v' $name '/t' $type '/d' $value '/f' | Out-Null
+        } else {
+            & 'reg' 'add' $path '/ve' '/t' $type '/d' $value '/f' | Out-Null
+        }
         Write-Log "Set registry: $path\$name = $value"
     } catch {
         Write-Log "Error setting registry $path\$name : $_" "ERROR"
@@ -95,13 +99,33 @@ function Set-RegistryValue {
     }
 }
 
-function Remove-RegistryValue {
+function Remove-RegistryKey {
     param([string]$path)
     try {
-        & 'reg' 'delete' $path '/f' | Out-Null
-        Write-Log "Removed registry: $path"
+        & 'reg' 'delete' $path '/f' 2>&1 | Out-Null
+        Write-Log "Removed registry key: $path"
     } catch {
-        Write-Log "Error removing registry $path : $_" "WARN"
+        Write-Log "Registry key not found or error: $path" "WARN"
+    }
+}
+
+function Remove-RegistryValue {
+    # Removes a single value from a registry key. $path is the full
+    # "key\valueName" form (e.g. '...\Run\OneDriveSetup'), where everything
+    # after the last backslash is the value name and the rest is the key.
+    param([string]$path)
+    $lastSlash = $path.LastIndexOf('\')
+    if ($lastSlash -lt 0) {
+        Write-Log "Invalid registry value path (missing key\value separator): $path" "WARN"
+        return
+    }
+    $keyPath = $path.Substring(0, $lastSlash)
+    $valueName = $path.Substring($lastSlash + 1)
+    try {
+        & 'reg' 'delete' $keyPath '/v' $valueName '/f' 2>&1 | Out-Null
+        Write-Log "Removed registry value: $path"
+    } catch {
+        Write-Log "Registry value not found or error: $path" "WARN"
     }
 }
 
@@ -187,20 +211,84 @@ function Copy-WindowsFiles {
     Write-Log "File copy complete"
 }
 
-function Validate-ImageIndex {
-    Write-Log "Validating image index $INDEX..."
+function Resolve-ImageIndex {
+    Write-Log "Resolving and validating image index $INDEX..."
     
-    $images = Get-WindowsImage -ImagePath $wimFilePath
-    $validIndices = $images.ImageIndex
-    
-    if ($INDEX -notin $validIndices) {
-        Write-Log "Invalid index $INDEX. Available indices:" "ERROR"
-        $images | ForEach-Object { Write-Log "  Index $($_.ImageIndex): $($_.ImageName)" }
-        throw "Image index $INDEX not found"
+    $sourceImagePath = ""
+    if (Test-Path "$DriveLetter\sources\install.wim") {
+        $sourceImagePath = "$DriveLetter\sources\install.wim"
+    } elseif (Test-Path "$DriveLetter\sources\install.esd") {
+        $sourceImagePath = "$DriveLetter\sources\install.esd"
+    } else {
+        throw "Windows installation files not found on ISO"
     }
     
-    $selectedImage = $images | Where-Object { $_.ImageIndex -eq $INDEX }
-    Write-Log "Selected: Index $INDEX - $($selectedImage.ImageName)"
+    $images = Get-WindowsImage -ImagePath $sourceImagePath
+    
+    # Standard Microsoft index mapping for Consumer ISOs
+    $expectedNames = @{
+        1 = "Windows 11 Home"
+        4 = "Windows 11 Education"
+        6 = "Windows 11 Pro"
+        7 = "Windows 11 Pro N"
+    }
+    
+    $targetName = $expectedNames[$INDEX]
+    
+    if ($targetName) {
+        $foundImage = $images | Where-Object { $_.ImageName -eq $targetName }
+        if ($foundImage) {
+            $actualIndex = $foundImage.ImageIndex
+            if ($actualIndex -ne $INDEX) {
+                Write-Log "Index shifted! Expected '$targetName' at $INDEX, but found at $actualIndex." "WARN"
+                Write-Log "Automatically adjusting INDEX to $actualIndex."
+                $script:INDEX = $actualIndex
+            } else {
+                Write-Log "Edition '$targetName' matched expected index $INDEX."
+            }
+        } else {
+            Write-Log "Expected edition '$targetName' not found in ISO. Proceeding with literal index $INDEX." "WARN"
+        }
+    } else {
+        Write-Log "No standard mapping for index $INDEX. Proceeding with literal index."
+    }
+    
+    $validIndices = $images.ImageIndex
+    
+    if ($script:INDEX -notin $validIndices) {
+        Write-Log "Invalid index $script:INDEX. Available indices:" "ERROR"
+        $images | ForEach-Object { Write-Log "  Index $($_.ImageIndex): $($_.ImageName)" }
+        throw "Image index $script:INDEX not found"
+    }
+    
+    $selectedImage = $images | Where-Object { $_.ImageIndex -eq $script:INDEX }
+    Write-Log "Selected: Index $script:INDEX - $($selectedImage.ImageName)"
+
+    # kelexine: the list object from 'Get-WindowsImage -ImagePath' has no 'Version'
+    # property - DISM only populates Version/SPBuild/Architecture on the detailed
+    # per-index object returned by 'Get-WindowsImage -ImagePath ... -Index N'.
+    # Re-query with -Index for build-number extraction. Wrapped in try/catch since
+    # this must never hard-fail the build - CI has its own windows_build fallback.
+    $script:DetectedImageName = $selectedImage.ImageName
+    $script:DetectedFullVersion = ""
+    try {
+        $detailedImage = Get-WindowsImage -ImagePath $sourceImagePath -Index $script:INDEX
+        if ($detailedImage -and ($detailedImage.PSObject.Properties.Match('Version').Count -gt 0)) {
+            $script:DetectedFullVersion = $detailedImage.Version
+        } else {
+            Write-Log "Detailed image query for index $script:INDEX returned no 'Version' property." "WARN"
+        }
+    } catch {
+        Write-Log "Failed to query detailed image info for build number detection: $_" "WARN"
+    }
+
+    if ($script:DetectedFullVersion -match '(\d+\.\d+)$') {
+        $script:DetectedBuildNumber = $Matches[1]
+        Write-Log "Detected Windows build number: $script:DetectedBuildNumber (full version: $script:DetectedFullVersion)"
+    } else {
+        $script:DetectedBuildNumber = ""
+        Write-Log "Could not parse a build number from image version '$script:DetectedFullVersion'" "WARN"
+    }
 }
 
 function Mount-WindowsImageFile {
@@ -288,6 +376,12 @@ function Remove-BloatwareApps {
         'Microsoft.Windows.DevHome',
         'Microsoft.Windows.Copilot',
         'Microsoft.Windows.Teams',
+        'Microsoft.Windows.Photos',
+        'Microsoft.ScreenSketch',
+        'Microsoft.StorePurchaseApp',
+        'Microsoft.MPEG2VideoExtension',
+        'Microsoft.WebMediaExtensions',
+        'MicrosoftWindows.Client.WebExperience',
         'Microsoft.WindowsAlarms',
         'Microsoft.WindowsCamera',
         'microsoft.windowscommunicationsapps',
@@ -332,7 +426,7 @@ function Remove-BloatwareApps {
 }
 
 function Remove-EdgeAndOneDrive {
-    Write-Log "Removing Microsoft Edge..."
+    Write-Log "Removing Microsoft Edge and Edge WebView..."
     
     $adminSID = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-544")
     $adminGroup = $adminSID.Translate([System.Security.Principal.NTAccount])
@@ -341,26 +435,61 @@ function Remove-EdgeAndOneDrive {
         "$scratchDir\Program Files (x86)\Microsoft\Edge",
         "$scratchDir\Program Files (x86)\Microsoft\EdgeUpdate",
         "$scratchDir\Program Files (x86)\Microsoft\EdgeCore",
+        "$scratchDir\Program Files (x86)\Microsoft\EdgeWebView",
         "$scratchDir\Windows\System32\Microsoft-Edge-Webview"
     )
     
     foreach ($path in $edgePaths) {
         if (Test-Path $path) {
+            Write-Log "Deleting Edge component: $path"
             & takeown /f $path /r /a | Out-Null
             & icacls $path /grant "$($adminGroup.Value):(F)" /T /C | Out-Null
             Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
     
-    Write-Log "Removing OneDrive..."
-    $oneDrivePath = "$scratchDir\Windows\System32\OneDriveSetup.exe"
-    if (Test-Path $oneDrivePath) {
-        & takeown /f $oneDrivePath /a | Out-Null
-        & icacls $oneDrivePath /grant "$($adminGroup.Value):(F)" /T /C | Out-Null
-        Remove-Item -Path $oneDrivePath -Force -ErrorAction SilentlyContinue
+    # Remove Edge WebView directories inside WinSxS (covers amd64 and arm64)
+    Write-Log "Removing Edge WebView assemblies from WinSxS..."
+    $winSxSPaths = Get-ChildItem -Path "$scratchDir\Windows\WinSxS" -Filter "*microsoft-edge-webview_31bf3856ad364e35*" -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+    foreach ($winSxSPath in $winSxSPaths) {
+        if (Test-Path $winSxSPath) {
+            Write-Log "Taking ownership and removing WinSxS WebView folder: $winSxSPath"
+            & takeown /f $winSxSPath /r /a | Out-Null
+            & icacls $winSxSPath /grant "$($adminGroup.Value):(F)" /T /C | Out-Null
+            Remove-Item -Path $winSxSPath -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
     
-    Write-Log "Edge and OneDrive removal complete"
+    Write-Log "Removing OneDrive..."
+    $oneDrivePaths = @(
+        "$scratchDir\Windows\System32\OneDriveSetup.exe",
+        "$scratchDir\Windows\SysWOW64\OneDriveSetup.exe"
+    )
+    foreach ($path in $oneDrivePaths) {
+        if (Test-Path $path) {
+            Write-Log "Deleting OneDrive setup: $path"
+            & takeown /f $path /a | Out-Null
+            & icacls $path /grant "$($adminGroup.Value):(F)" /T /C | Out-Null
+            Remove-Item -Path $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+    
+    Write-Log "Edge, Edge WebView, and OneDrive removal complete"
+    
+    # Clean up other remnants
+    Write-Log "Cleaning up other remnants (GameBar, Copilot)..."
+    $otherRemnants = @(
+        "$scratchDir\Windows\GameBarPresenceWriter",
+        "$scratchDir\Windows\System32\SettingsHandlers_Copilot.dll"
+    )
+    foreach ($path in $otherRemnants) {
+        if (Test-Path $path) {
+            Write-Log "Deleting remnant: $path"
+            & takeown /f $path /a | Out-Null
+            & icacls $path /grant "$($adminGroup.Value):(F)" /T /C | Out-Null
+            Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function Apply-RegistryTweaks {
@@ -407,8 +536,8 @@ function Apply-RegistryTweaks {
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\PushToInstall' 'DisablePushToInstall' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\MRT' 'DontOfferThroughWUAU' 'REG_DWORD' '1'
     
-    Remove-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager\Subscriptions'
-    Remove-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager\SuggestedApps'
+    Remove-RegistryKey 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager\Subscriptions'
+    Remove-RegistryKey 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager\SuggestedApps'
     
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' 'DisableConsumerAccountStateContent' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' 'DisableCloudOptimizedContent' 'REG_DWORD' '1'
@@ -433,11 +562,15 @@ function Apply-RegistryTweaks {
     Set-RegistryValue 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced' 'TaskbarMn' 'REG_DWORD' '0'
     
     # Remove Edge registries
-    Remove-RegistryValue "HKLM\zSOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Edge"
-    Remove-RegistryValue "HKLM\zSOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Edge Update"
+    Remove-RegistryKey "HKLM\zSOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Edge"
+    Remove-RegistryKey "HKLM\zSOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Edge Update"
     
     # Disable OneDrive folder backup
     Set-RegistryValue "HKLM\zSOFTWARE\Policies\Microsoft\Windows\OneDrive" "DisableFileSyncNGSC" "REG_DWORD" "1"
+    
+    # Remove OneDrive from Run keys (prevent auto-install on first login)
+    Remove-RegistryValue "HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Run\OneDriveSetup"
+    Remove-RegistryValue "HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\Run\OneDriveSetup"
     
     # Disable telemetry
     Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo' 'Enabled' 'REG_DWORD' '0'
@@ -455,8 +588,8 @@ function Apply-RegistryTweaks {
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Orchestrator\UScheduler_Oobe\OutlookUpdate' 'workCompleted' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Orchestrator\UScheduler\OutlookUpdate' 'workCompleted' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Orchestrator\UScheduler\DevHomeUpdate' 'workCompleted' 'REG_DWORD' '1'
-    Remove-RegistryValue 'HKLM\zSOFTWARE\Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe\OutlookUpdate'
-    Remove-RegistryValue 'HKLM\zSOFTWARE\Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe\DevHomeUpdate'
+    Remove-RegistryKey 'HKLM\zSOFTWARE\Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe\OutlookUpdate'
+    Remove-RegistryKey 'HKLM\zSOFTWARE\Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe\DevHomeUpdate'
     
     # Disable Copilot
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsCopilot' 'TurnOffWindowsCopilot' 'REG_DWORD' '1'
@@ -483,7 +616,18 @@ function Apply-RegistryTweaks {
     
     # Prevent new Outlook installation
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\Windows Mail' 'PreventRun' 'REG_DWORD' '1'
+
+    # Easter Egg / Branding
+    Write-Log "Adding Easter Egg branding..."
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' 'legalnoticecaption' 'REG_SZ' 'Tiny11 Automated'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' 'legalnoticetext' 'REG_SZ' 'This image was built using Tiny11 Automated by kelexine. Enjoy your lightweight Windows experience!'
     
+    # Desktop Context Menu Link
+    Set-RegistryValue 'HKLM\zSOFTWARE\Classes\DesktopBackground\Shell\Tiny11Info' 'MUIVerb' 'REG_SZ' 'Tiny11 Automated Info'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Classes\DesktopBackground\Shell\Tiny11Info' 'Icon' 'REG_SZ' 'shell32.dll,22'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Classes\DesktopBackground\Shell\Tiny11Info' 'Position' 'REG_SZ' 'Bottom'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Classes\DesktopBackground\Shell\Tiny11Info\command' '' 'REG_SZ' 'explorer.exe "https://github.com/kelexine/tiny11-automated"'
+
     Write-Log "Registry tweaks applied"
 }
 
@@ -531,6 +675,95 @@ function Remove-NonEssentialServices {
     }
     
     Write-Log "Non-essential services disabled"
+}
+
+function Apply-PerformanceTweaks {
+    # Author: kelexine (https://github.com/kelexine)
+    # Bakes performance optimizations into the offline image via registry.
+    # Covers: Memory, CPU/Scheduler, Storage (NTFS), Network (TCP), Gaming, Boot time.
+    # Profile: Conservative — safe for desktop and dev workstation use.
+    Write-Log "Applying performance optimizations (desktop/dev profile)..."
+
+    # ── Memory Management ──────────────────────────────────────────────────
+    # Keep default paging for kernel drivers — safe for variable-RAM desktop systems
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager\Memory Management' 'DisablePagingExecutive'  'REG_DWORD' '0'
+    # Workstation memory model (0 = workstation, not server)
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager\Memory Management' 'LargeSystemCache'        'REG_DWORD' '0'
+    # Skip zeroing page file on shutdown — saves 30-60 s per reboot cycle
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager\Memory Management' 'ClearPageFileAtShutdown' 'REG_DWORD' '0'
+    # SysMain is disabled — match prefetcher state to prevent orphaned background I/O
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager\Memory Management\PrefetchParameters' 'EnablePrefetcher' 'REG_DWORD' '0'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager\Memory Management\PrefetchParameters' 'EnableSuperfetch' 'REG_DWORD' '0'
+
+    # ── CPU / Thread Scheduler ─────────────────────────────────────────────
+    # 38 (0x26): foreground boost ON + variable short quanta — gaming and desktop sweet spot
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\PriorityControl' 'Win32PrioritySeparation' 'REG_DWORD' '38'
+
+    # ── MMCSS (Multimedia Class Scheduler) ────────────────────────────────
+    # Disable network throttling during multimedia/game workloads
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile' 'NetworkThrottlingIndex' 'REG_DWORD' '0xffffffff'
+    # 20 = default; reserves 20% CPU headroom for background tasks (safe for desktop)
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile' 'SystemResponsiveness'   'REG_DWORD' '20'
+    # MMCSS Games class — moderate GPU/CPU priority balanced for gaming alongside other workloads
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' 'GPU Priority'        'REG_DWORD' '2'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' 'Priority'            'REG_DWORD' '6'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' 'Scheduling Category' 'REG_SZ'    'Medium'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' 'SFIO Priority'       'REG_SZ'    'High'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' 'Latency Sensitive'   'REG_SZ'    'True'
+
+    # ── Storage / NTFS ────────────────────────────────────────────────────
+    # Disable 8.3 short filename generation — pure legacy overhead on modern systems
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\FileSystem' 'NtfsDisable8dot3NameCreation' 'REG_DWORD' '1'
+    # Disable last-access timestamp update on every file read — eliminates per-read metadata writes
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\FileSystem' 'NtfsDisableLastAccessUpdate'  'REG_DWORD' '1'
+    # Allow NTFS more memory for its internal metadata cache
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\FileSystem' 'NtfsMemoryUsage'              'REG_DWORD' '2'
+    # Ensure SSD TRIM delete notifications are not suppressed
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\FileSystem' 'DisableDeleteNotification'    'REG_DWORD' '0'
+
+    # ── Network / TCP ─────────────────────────────────────────────────────
+    # Shrink TIME_WAIT from 240 s → 30 s (recycles ports faster after connection close)
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Services\Tcpip\Parameters' 'TcpTimedWaitDelay' 'REG_DWORD' '30'
+    # Expand ephemeral port range to near-maximum
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Services\Tcpip\Parameters' 'MaxUserPort'       'REG_DWORD' '65534'
+    # RFC 1323: TCP window scaling + timestamps (better throughput on high-bandwidth links)
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Services\Tcpip\Parameters' 'Tcp1323Opts'       'REG_DWORD' '1'
+    # TTL 64 (Linux/BSD default): consistent cross-platform behaviour
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Services\Tcpip\Parameters' 'DefaultTTL'        'REG_DWORD' '64'
+    # Disable WSD (Web Services on Devices) network probe overhead
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Services\Tcpip\Parameters' 'EnableWsd'         'REG_DWORD' '0'
+    # Per-interface Nagle + delayed-ACK disable — deferred to first boot (adapter GUIDs unknown offline)
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' 'PerfTuneNagle' 'REG_SZ' `
+        'powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "Get-ChildItem HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces | ForEach-Object { Set-ItemProperty $_.PSPath TCPNoDelay 1 -Type DWord -ErrorAction SilentlyContinue; Set-ItemProperty $_.PSPath TcpAckFrequency 1 -Type DWord -ErrorAction SilentlyContinue; Set-ItemProperty $_.PSPath TCPDelAckTicks 0 -Type DWord -ErrorAction SilentlyContinue }"'
+
+    # ── Gaming ────────────────────────────────────────────────────────────
+    # Hardware Accelerated GPU Scheduling (HAGS) — reduces CPU↔GPU submission latency
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\GraphicsDrivers' 'HwSchMode'   'REG_DWORD' '2'
+    # Raise GPU TDR timeout: default 2 s causes false "GPU hung" errors under sustained load
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\GraphicsDrivers' 'TdrDelay'    'REG_DWORD' '10'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\GraphicsDrivers' 'TdrDdiDelay' 'REG_DWORD' '10'
+    # Disable Xbox Game DVR / Game Bar capture overlay
+    Set-RegistryValue 'HKLM\zNTUSER\SYSTEM\GameConfigStore' 'GameDVR_Enabled'                        'REG_DWORD' '0'
+    Set-RegistryValue 'HKLM\zNTUSER\SYSTEM\GameConfigStore' 'GameDVR_FSEBehaviorMode'                'REG_DWORD' '2'
+    Set-RegistryValue 'HKLM\zNTUSER\SYSTEM\GameConfigStore' 'GameDVR_HonorUserFSEBehaviorMode'       'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zNTUSER\SYSTEM\GameConfigStore' 'GameDVR_DXGIHonorFSEWindowsCompatible'  'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zNTUSER\SYSTEM\GameConfigStore' 'GameDVR_EFSEBehaviorMode'               'REG_DWORD' '0'
+    # Enable Game Mode — Windows auto-prioritizes detected game processes
+    Set-RegistryValue 'HKLM\zNTUSER\SOFTWARE\Microsoft\GameBar' 'AllowAutoGameMode'   'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zNTUSER\SOFTWARE\Microsoft\GameBar' 'AutoGameModeEnabled' 'REG_DWORD' '1'
+
+    # ── Boot Time ─────────────────────────────────────────────────────────
+    # Remove Explorer shell extension load stagger (default 5 s; now immediate)
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Serialize' 'StartupDelayInMSec' 'REG_DWORD' '0'
+    # Remove chkdsk countdown at boot — runs immediately if volume is flagged, skips otherwise
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager' 'AutoChkTimeOut' 'REG_DWORD' '0'
+    # Fast Startup (HiberBoot) ON — kernel hibernation gives faster cold boots on desktop
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager\Power' 'HiberbootEnabled' 'REG_DWORD' '1'
+    # BCD tweaks — cannot modify BCD store offline; deferred to first boot via RunOnce
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' 'PerfTuneBCD' 'REG_SZ' `
+        'powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "& bcdedit /set timeout 10 2>&1 | Out-Null"'
+
+    Write-Log "Performance optimizations applied (desktop/dev profile)"
 }
 
 function Unload-RegistryHives {
@@ -650,6 +883,27 @@ function Create-TinyISO {
     }
 }
 
+function Write-BuildInfo {
+    # kelexine: emits build metadata JSON so CI can read the real Windows build number
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$OutputPath
+    )
+    try {
+        $buildInfo = @{
+            windows_build = $script:DetectedBuildNumber
+            full_version  = $script:DetectedFullVersion
+            image_name    = $script:DetectedImageName
+            image_index   = $INDEX
+            generated_at  = (Get-Date -Format 'o')
+        }
+        $buildInfo | ConvertTo-Json | Out-File -FilePath $OutputPath -Encoding UTF8 -Force
+        Write-Log "Build info written to $OutputPath"
+    } catch {
+        Write-Log "Failed to write build info to $OutputPath : $_" "WARN"
+    }
+}
+
 function Invoke-Cleanup {
     if ($SkipCleanup) {
         Write-Log "Skipping cleanup (SkipCleanup flag set)" "WARN"
@@ -686,19 +940,22 @@ try {
     
     Test-Prerequisites
     
+    Resolve-ImageIndex
+    
     # Handle install.esd conversion if needed
     if (Test-Path "$DriveLetter\sources\install.esd") {
         Write-Log "Found install.esd, conversion required"
         Initialize-Directories
         Convert-ESDToWIM
         Copy-WindowsFiles
+        Write-Log "Resetting INDEX to 1 since ESD was exported to a new WIM"
+        $script:INDEX = 1
     } else {
         Write-Log "Found install.wim, no conversion needed"
         Initialize-Directories
         Copy-WindowsFiles
     }
     
-    Validate-ImageIndex
     Mount-WindowsImageFile
     Get-ImageMetadata
     
@@ -706,6 +963,7 @@ try {
     Remove-BloatwareApps
     Remove-EdgeAndOneDrive
     Apply-RegistryTweaks
+    Apply-PerformanceTweaks
     Remove-ScheduledTasks
     Remove-NonEssentialServices
     Unload-RegistryHives
@@ -715,6 +973,7 @@ try {
     Dismount-AndExport
     Process-BootImage
     Create-TinyISO
+    Write-BuildInfo -OutputPath "$PSScriptRoot\tiny11-buildinfo.json"
     
     # Cleanup
     Invoke-Cleanup
